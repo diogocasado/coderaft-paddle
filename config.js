@@ -6,7 +6,7 @@ const Defaults = {
 		group:  'www-data'
 	},
 	http: {
-		path: '/var/run/http_paddle.sock'
+		path: '/run/paddle.sock'
 	},
 	webhooks: {
 		github: {}

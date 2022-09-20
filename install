@@ -1,0 +1,28 @@
+#!/usr/bin/bash
+
+OLD_PWD=$(pwd)
+BASE_PATH=$(cd $(dirname "$0"); pwd)
+NODE_PATH=$(which node)
+SYSTEM_PATH=/usr/lib/systemd/system
+
+gen_unit_file () {
+	cat <<-EOF
+	[Unit]
+	Description=Simple tool to handle services and webhook integrations.
+
+	[Service]
+	ExecStart=$NODE_PATH $BASE_PATH
+	Restart=on-failure
+	RestartSec=2
+
+	[Install]
+	WantedBy=multi-user.target
+	EOF
+}
+
+if [ -d "${SYSTEM_PATH}" ]; then
+	echo "$(gen_unit_file)" > "$SYSTEM_PATH/paddle.service"
+	systemctl start paddle
+fi
+
+cd $OLD_PWD
