@@ -6,11 +6,23 @@ const Defaults = {
 		group:  'www-data'
 	},
 	http: {
-		path: '/run/paddle.sock'
+		path: '/run/paddle.sock',
+		webhooks: [ 'github' ]
 	},
-	webhooks: {
-		github: {}
-	}
+	services: [
+		/*
+		{
+			name: 'name.service',
+			gitPath: '/root/dir/source',
+			location: '/url/path',
+			proxyPass: 'http://unix:/path/file.sock',
+			environ: [
+				['REQUESTS', 'Resquests since restart'],
+				['REQUESTS_5MIN', 'Requests last 5 min']
+			]
+		}
+		*/
+	]
 }
 
 function build () {

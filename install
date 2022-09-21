@@ -3,9 +3,9 @@
 OLD_PWD=$(pwd)
 BASE_PATH=$(cd $(dirname "$0"); pwd)
 NODE_PATH=$(which node)
-SYSTEM_PATH=/usr/lib/systemd/system
+SYSTEMD_PATH=/usr/lib/systemd/system
 
-gen_unit_file () {
+gen_systemd_unit () {
 	cat <<-EOF
 	[Unit]
 	Description=Simple tool to handle services and webhook integrations.
@@ -21,8 +21,10 @@ gen_unit_file () {
 }
 
 if [ -d "${SYSTEM_PATH}" ]; then
-	echo "$(gen_unit_file)" > "$SYSTEM_PATH/paddle.service"
+	"Creating systemd service.."
+	echo "$(gen_systemd_unit)" > "$SYSTEMD_PATH/paddle.service"
 	systemctl start paddle
+	systemctl --no-pager -n5 status paddle
 fi
 
 cd $OLD_PWD
