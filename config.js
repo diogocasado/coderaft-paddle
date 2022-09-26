@@ -1,5 +1,7 @@
 exports.build = build;
 
+const Stats = require('./stats');
+
 const SEC = 1000;
 const MIN = 60 * SEC;
 const HR = 60 * MIN;
@@ -11,32 +13,53 @@ const Defaults = {
 		webhooks: [
 			'discord'
 		],
-		sockPath: '/run/paddle.sock'
+		sockPath: '/run/paddle.sock',
+		collectStatsInterval: 5 * SEC,
 	},
 	http: {
 		path: '/run/paddle_http.sock'
 	},
+	discord: {
+		greetMessage: true,
+		reuseStatsMessage: true,
+		combineStatsMessage: true,
+		// url: 'copied from integrations ins discord'
+	},
 	services: [
-		{
-			name: 'dummy',
-			gitPath: '/root/dummy',
-			location: '/',
-			proxyPass: 'http://unix:/run/dummy.sock',
-			publishStatsInterval: 30 * SEC,
-			discord: {
-				greetMessage: true,
-				reuseStatsMessage: true,
-				url: 'https://discord.com/api/webhooks/1022611971750764594/4AW7D23fNzSbJ79ZopJmX_BXrk3EqM8Xp6lPFPbBa-CStGxqEctB3t6itFd8mVr1R5A9'
-			}
+		/* Provide a local.js file that adds a service. E.g.:
+		exports.config = (config) => {
+			config.services.push({
+				name: 'dummy',
+				gitPath: '/root/dummy',
+				location: '/',
+				proxyPass: 'http://unix:/run/dummy.sock',
+				publishStatsInterval: 60000,
+				discord: {
+					url: 'copied from integrations in discord'
+				}
+			});
 		}
+		* Coderaft does this automagically.
+		*/
+	],
+	stats: [
+		Stats.upTime,
+		Stats.loadAvg,
+		Stats.memInfo,
+		Stats.diskInfo
 	]
 }
 
 function build () {
+
+	const Local = require('./local.js');
+
 	let baked = Object.assign({
 		flags: {}
 	}, Defaults);
 	
+	Local.config(baked);
+
 	if (typeof baked.http.host === 'string' && 
 	    typeof baked.http.port === 'number')
 		baked.flags.is_inetHttp = true;

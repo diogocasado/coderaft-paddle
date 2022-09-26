@@ -12,9 +12,18 @@ const Paddle = {
 	webhooks: [],
 	routes: [],
 	run: {
-		services: []
+		hostname: null,
+		services: [],
+		stats: []
 	}
 };
+
+async function setupHostname () {
+	const hostname = await execFile('hostname');
+	const lines = hostname.stdout.split(/\n\r?/);
+	Paddle.run.hostname = lines[0].trim();
+	console.log(`Hostname: ${Paddle.run.hostname}`);
+}
 
 async function setupWebhooks () {
 	
@@ -34,12 +43,21 @@ async function setupWebhooks () {
 
 			notifyEv('start', run);
 
-			if (typeof config.publishStatsInterval !== 'undefined')
+			if (typeof config.publishStatsInterval !== 'undefined' &&
+				config.publishStatsInterval > 0)
 				run.publishInterval = setInterval(
 					notifyEv,
-					config.publishStatsInterval,
+					Math.max(config.publishStatsInterval, 1000),
 					'stats',
 					run);
+		}
+
+		const collectStatsInterval = Paddle.config.run.collectStatsInterval;
+		if (typeof collectStatsInterval !== 'undefined' &&
+			collectStatsInterval > 0) {
+			Paddle.run.collectStatsInterval = setInterval(
+				collectStats,
+				Math.max(collectStatsInterval, 1000));
 		}
 	}
 }
@@ -47,7 +65,7 @@ async function setupWebhooks () {
 async function setupUnixSockets () {
 
 	try {
-		let stats = await Fs.stat(Paddle.config.run.sockPath);
+		const stats = await Fs.stat(Paddle.config.run.sockPath);
 		if (!stats.isSocket())
 			throw "Error: Cannot use socket at " +
 				Paddle.config.run.socketPath;
@@ -59,7 +77,7 @@ async function setupUnixSockets () {
 
 	if (Paddle.config.flags.is_sockHttp) {
 		try {
-			stats = await Fs.stat(Paddle.config.http.path);
+			const stats = await Fs.stat(Paddle.config.http.path);
 			if (!stats.isSocket())
 				throw "Error: Cannot use http socket at " +
 					Paddle.config.http.path;
@@ -87,13 +105,12 @@ async function chownUnixSockets () {
 }
 
 async function setguidProcess () {
-
 	process.setegid(Paddle.config.run.group);
 	process.seteuid(Paddle.config.run.user);
 
 	console.log('Running as ' +
-			`${Paddle.config.run.user},${process.geteuid()}:` +
-			`${Paddle.config.run.group},${process.getegid()}`);
+			`${Paddle.config.run.user}:${process.geteuid()},` +
+			`${Paddle.config.run.group}:${process.getegid()}`);
 }
 
 function startPaddleServer () {
@@ -111,8 +128,6 @@ function handlePaddleConnect (client) {
 	client.setEncoding('utf8');
 	client.setTimeout(500);
 
-	console.log('Connection: ' + client.remoteAddress);
-
 	let message = '';
 	client.on('data', (chunk) => {
 		message += chunk;
@@ -123,7 +138,6 @@ function handlePaddleConnect (client) {
 	});
 
 	client.on('end', () => {
-		console.log('Received: ' + message);
 		handlePaddleRequest(JSON.parse(message), client);
 	});
 
@@ -134,11 +148,9 @@ function handlePaddleConnect (client) {
 }
 
 function handlePaddleRequest (request, client) {
-
 	const service = lookupService(request.serviceName);
 	if (service) {
 		updateStats(request.stats, service.stats);
-		console.log('Handled request', service);
 	} else {
 		console.log(`Warning: Request discarded (serviceName: ${request.serviceName})`);
 	}
@@ -149,11 +161,6 @@ function lookupService (name) {
 		if (service.config.name === name)
 			return service;
 	}
-}
-
-function updateStats (src, dst) {
-	for (let stat of src)
-		updateStat(stat, dst);
 }
 
 function updateStat (stat, stats) {
@@ -178,6 +185,11 @@ function updateStat (stat, stats) {
 	target.id = stat.id;
 	target.description = stat.description;
 	target.value = stat.value;
+}
+
+function updateStats (src, dst) {
+	for (let stat of src)
+		updateStat(stat, dst);
 }
 
 function startHttpServer () {
@@ -205,14 +217,19 @@ function handleHttpRequest  (request, response) {
 	response.end('Hello back');
 }
 
-function notifyEv (name, serviceRun) {
-	console.log(`Event ${name} ${serviceRun.config.name}`);
+async function collectStats () {
+	for (let stat of Paddle.config.stats) {
+		const state = Object.assign({}, stat);
+		state.value = await stat.value(stat.options);
+		updateStat(state, Paddle.run.stats);
+	}
+}
 
+function notifyEv (name, serviceRun) {
 	for (let webhook of Paddle.webhooks) {
 		if (typeof webhook.notifyEv === 'function')
 			webhook.notifyEv(name, serviceRun);
 	}
-
 }
 
 function handleError (error) {
@@ -221,6 +238,7 @@ function handleError (error) {
 }
 
 Promise.resolve({})
+	.then(setupHostname)
 	.then(setupWebhooks)
 	.then(setupUnixSockets)
 	.then(startPaddleServer)

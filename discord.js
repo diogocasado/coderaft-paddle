@@ -4,68 +4,98 @@ exports.notifyEv = handleEv;
 
 const Https = require('node:https');
 
-function log (...args) {
-	console.log('[Discord.gg]', ...args);
+var Paddle = null;
+
+function isGreetMessageOn (service) {
+	return service?.config.discord.greetMessage ??
+		Paddle.config.discord.greetMessage;
 }
 
-function init (paddle) {
+function isReuseStatsMessageOn (service) {
+	return service?.config.discord.reuseStatsMessage ??
+		Paddle.config.discord.reuseStatsMessage;
+}
+
+function log (...args) {
+	console.log('[Discord]', ...args);
+}
+
+function init (instance) {
 	
 	let load = false;
-	for (let service of paddle.config.services) {
+
+	if (typeof instance.config.discord.url !== 'undefined')
+		load = true;
+	for (let service of instance.config.services) {
 		if (typeof service.discord !== 'undefined')
 			load = true;
 	}
+
+	if (load)
+		Paddle = instance;
 
 	log(`Init (load: ${load})`);
 	return load;
 }
 
 function handleEv (name, payload) {
-	log(`Event ${name}`);
 
-	if (name === 'start')
-		postGreet(payload);
-	else if (name === 'stats')
-		postStats(payload);
+	if (name === 'start') {
+		if (isGreetMessageOn(payload))
+			postGreet(payload);
+	} else if (name === 'stats') {
+		if (!Paddle.config.discord.combineStatsMessage)
+			postStats();
+		if (payload)
+			postStats(payload);
+	}
 }
 
-function postGreet (serviceRun) {
+function postGreet (service) {
 
 	const requestObj = {
 		content: 'Keep paddling :sailboat:'
 	};
 
-	const url = new URL(serviceRun.config.discord.url);
+	const url = new URL(service.config.discord.url);
 
 	postWebhook(url, requestObj);
 }
 
-function postStats (serviceRun) {
-	
+function postStats (service) {
+	const state = service ?
+		service.discord || {} :
+		Paddle.run.discord || {};
+	if (service) service.discord = state;
+	else Paddle.run.discord = state;
+
 	let invokeWebhook = postWebhook;
 
-	const url = new URL(serviceRun.config.discord.url);
+	const url = new URL(service?.config.discord.url ??
+		Paddle.config.discord.url);
 
-	if (serviceRun.config.discord.reuseStatsMessage &&
-	    serviceRun.discordStatsMessageId) {
+	if (isReuseStatsMessageOn(service) &&
+	    state.statsMessageId) {
 		invokeWebhook = patchWebhook;
-		url.pathname += `/messages/${serviceRun.discordStatsMessageId}`;
+		url.pathname += `/messages/${state.statsMessageId}`;
 	}
 
 	if (!url.searchParams.has('wait'))
 		url.searchParams.append('wait', true);
 
 	const requestObj = {
-		content: generateMessage(serviceRun),
-		embeds: generateEmbeds(serviceRun)
+		content: generateMessage(service),
+		embeds: generateEmbeds(service)
 	}
 
 	invokeWebhook(url, requestObj, (responseObj) => {
 
-		if (serviceRun.config.discord.reuseStatsMessage &&
-		    typeof serviceRun.discordStatsMessageId === 'undefined') {
-			serviceRun.discordStatsMessageId = responseObj.id;
-			log(`Reusing message ${responseObj.id}`);
+		if (isReuseStatsMessageOn(service) &&
+			typeof state.statsMessageId === 'undefined' &&
+			responseObj) {
+			state.statsMessageId = responseObj.id;
+			log(`Reusing message ${state.statsMessageId} ` +
+				`(${service ? service.config.name : Paddle.run.hostname})`);
 		}
 	});
 }
@@ -87,9 +117,8 @@ function requestWebhook (method, url, requestObj, callback) {
 		}
 	};
 
-	log('POST', url.href, requestObj);
 	const request = Https.request(url.href, options, (response) => {
-		log(`Status ${response.statusCode}`);
+
 		if (response.statusCode != 200 &&
 		    response.statusCode != 204)
 			log(`Bad status ${response.statusCode}`);
@@ -102,7 +131,9 @@ function requestWebhook (method, url, requestObj, callback) {
 		});
 		
 		response.on('end', () => {
-			console.log(`Response (${responseJson.length}) ${responseJson}`);
+			if (response.statusCode !== 200 &&
+			    responseJson.length > 0)
+				console.log(`Response (${responseJson.length}) ${responseJson}`);
 			const responseObj = response.statusCode == 200 ?
 				JSON.parse(responseJson) :
 				undefined;
@@ -115,36 +146,57 @@ function requestWebhook (method, url, requestObj, callback) {
 		log('Request error', error.message);
 	});
 
-	request.write(JSON.stringify(requestObj));
+	const requestJson = JSON.stringify(requestObj);
+	//log('Request', requestJson);
+
+	request.write(requestJson);
 	request.end();
 }
 
-function generateMessage (serviceRun) {
-	let message = `:sailboat:\n**Service**: ${serviceRun.config.name}`;
-	return message;
-
-	for (let stat of serviceRun.stats) {
-		if (message.length > 0)
-			message += '\n';
-		message += stat.description + ': ' + stat.value;
-	}
-
+function generateMessage (service) {
+	let message = `:sailboat:\n` +
+		`**Updated**: ${new Date()}`
 	return message;
 }
 
-function generateEmbeds (serviceRun) {
+function generateEmbeds (service) {
 	const embeds = [];
 
-	const fields = [];
-	for (let stat of serviceRun.stats) {
+	if (Paddle.config.discord.combineStatsMessage || !service) {
+		const fields = [];
 		fields.push({
-			name: stat.description,
-			value: stat.value,
-			inline: true
+			name: 'Hostname',
+			value: Paddle.run.hostname,
+			inline: false
 		});
+		for (let stat of Paddle.run.stats) {
+			fields.push({
+				name: stat.description,
+				value: stat.value,
+				inline: true
+			});
+		}
+		if (fields.length > 0)
+			embeds.push({ fields: fields });
 	}
-	if (fields.length > 0)
-		embeds.push({ fields: fields });
+
+	if (service) {
+		const fields = [];
+		fields.push({
+			name: 'Service',
+			value: service.config.name,
+			inline: false
+		});
+		for (let stat of service.stats) {
+			fields.push({
+				name: stat.description,
+				value: stat.value,
+				inline: true
+			});
+		}
+		if (fields.length > 0)
+			embeds.push({ fields: fields });
+	}
 
 	return embeds;
 

@@ -20,11 +20,16 @@ gen_systemd_unit () {
 	EOF
 }
 
-if [ -d "${SYSTEM_PATH}" ]; then
+if [ -d "${SYSTEMD_PATH}" ]; then
 	"Creating systemd service.."
 	echo "$(gen_systemd_unit)" > "$SYSTEMD_PATH/paddle.service"
-	systemctl start paddle
-	systemctl --no-pager -n5 status paddle
+
+	if [ -f "$BASE_PATH/local.js" ]; then
+		systemctl start paddle
+		systemctl --no-pager -n5 status paddle
+	else
+		[ -z "$CODERAFT" ] && echo "Provide a local.js"
+	fi
 fi
 
 cd $OLD_PWD
