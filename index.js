@@ -2,21 +2,32 @@ const OS = require('node:os');
 const Fs = require('node:fs').promises;
 const Net = require('node:net');
 const Http = require('node:http');
+
 const Config = require('./config');
+const Log = require('./log');
 
 const promisify = require('node:util').promisify;
 const execFile = promisify(require('node:child_process').execFile);
 
 const Paddle = {
 	config: Config.build(),
-	webhooks: [],
+	modules: [],
 	routes: [],
 	run: {
 		hostname: null,
 		services: [],
-		stats: []
+		stats: [],
+		discord: undefined,
+		github: undefined
 	}
 };
+
+let Logger = null;
+
+async function initLog () {
+	console.log('== Paddle ==');
+	Logger = Log.createLogger(Paddle);
+}
 
 async function setupHostname () {
 	const hostname = await execFile('hostname');
@@ -27,13 +38,14 @@ async function setupHostname () {
 
 async function setupWebhooks () {
 	
-	for (let webhook of Paddle.config.run.webhooks) {
-		const module = require('./' + webhook);
+	for (let modname of Paddle.config.run.modules) {
+		Logger.debug(`Load ${modname}`);
+		const module = require('./' + modname);
 		if (module.init(Paddle))
-			Paddle.webhooks.push(module);
+			Paddle.modules.push(module);
 	}
 
-	if (Paddle.webhooks.length > 0) {
+	if (Paddle.modules.length > 0) {
 		for (let index = 0; index < Paddle.config.services.length; index++) {
 			const config = Paddle.config.services[index];
 			const run = Paddle.run.services[index] = {
@@ -52,12 +64,12 @@ async function setupWebhooks () {
 					run);
 		}
 
-		const collectStatsInterval = Paddle.config.run.collectStatsInterval;
-		if (typeof collectStatsInterval !== 'undefined' &&
-			collectStatsInterval > 0) {
-			Paddle.run.collectStatsInterval = setInterval(
-				collectStats,
-				Math.max(collectStatsInterval, 1000));
+		const statsInterval = Paddle.config.run.statsInterval;
+		if (typeof statsInterval !== 'undefined' &&
+		    statsInterval > 0) {
+			Paddle.run.statsInterval = setInterval(
+				updateStats,
+				Math.max(statsInterval, 1000));
 		}
 	}
 }
@@ -77,11 +89,11 @@ async function setupUnixSockets () {
 
 	if (Paddle.config.flags.is_sockHttp) {
 		try {
-			const stats = await Fs.stat(Paddle.config.http.path);
+			const stats = await Fs.stat(Paddle.config.http.sockPath);
 			if (!stats.isSocket())
 				throw "Error: Cannot use http socket at " +
-					Paddle.config.http.path;
-			await Fs.unlink(Paddle.config.http.path);
+					Paddle.config.http.sockPath;
+			await Fs.unlink(Paddle.config.http.sockPath);
 		} catch (error) {
 			if (error.errno !== -OS.constants.errno.ENOENT)
 				throw error;
@@ -99,8 +111,8 @@ async function chownUnixSockets () {
 	await Fs.chown(Paddle.config.run.sockPath, ueid, geid);
 	await Fs.chmod(Paddle.config.run.sockPath, 0770);
 	if (Paddle.config.flags.is_sockHttp) {
-		await Fs.chown(Paddle.config.http.path, ueid, geid);
-		await Fs.chmod(Paddle.config.http.path, 0770);
+		await Fs.chown(Paddle.config.http.sockPath, ueid, geid);
+		await Fs.chmod(Paddle.config.http.sockPath, 0770);
 	}
 }
 
@@ -196,7 +208,15 @@ function startHttpServer () {
 	Paddle.httpServer = Http.createServer(handleHttpRequest);
 	Paddle.httpServer.on('error', handleError);
 	Paddle.httpServer.on('listening', handleHttpListen);
-	Paddle.httpServer.listen(Paddle.config.http);
+	const options = {};
+	if (Paddle.config.flags.is_inetHttp)
+		Object.assign(options, {
+			port: Paddle.config.http.port,
+			host: Paddle.config.http.host
+		});
+	if (Paddle.config.flags.is_sockHttp)
+		options.path = Paddle.config.http.sockPath;
+	Paddle.httpServer.listen(options);
 }
 
 function handleHttpListen () {
@@ -207,17 +227,32 @@ function handleHttpListen () {
 			Paddle.config.http.port;
 	else if (Paddle.config.flags.is_sockHttp)
 		bindStr +=
-			'unix:' + Paddle.config.http.path;
+			'unix:' + Paddle.config.http.sockPath;
 	console.log('Listening on ' + bindStr);
 }
 
 function handleHttpRequest  (request, response) {
-	console.log('Request: ', request);
-	response.writeHead(200, { 'Content-Type': 'text/plain' });
-	response.end('Hello back');
+	Logger.debug('Request', request.method, request.url);
+
+	const url = new URL(request.url, `http://${request.headers.host}`);
+	const route = findHttpRoute(url);
+	if (route) {
+		route.handler(request, response);
+	} else {
+		response.writeHead(404).end();
+	}
 }
 
-async function collectStats () {
+function findHttpRoute (url) {
+	for (let route of Paddle.routes) {
+		const routePath = Paddle.config.http.urlPath + route.urlPath;
+		Logger.debug('Match', routePath);
+		if (url.pathname.startsWith(routePath))
+			return route;
+	}
+}
+
+async function updateStats () {
 	for (let stat of Paddle.config.stats) {
 		const state = Object.assign({}, stat);
 		state.value = await stat.value(stat.options);
@@ -225,10 +260,11 @@ async function collectStats () {
 	}
 }
 
-function notifyEv (name, serviceRun) {
-	for (let webhook of Paddle.webhooks) {
-		if (typeof webhook.notifyEv === 'function')
-			webhook.notifyEv(name, serviceRun);
+function notifyEv (name, payload) {
+	Logger.debug('Event', name);
+	for (let module of Paddle.modules) {
+		if (typeof module.notifyEv === 'function')
+			module.notifyEv(name, payload);
 	}
 }
 
@@ -238,6 +274,7 @@ function handleError (error) {
 }
 
 Promise.resolve({})
+	.then(initLog)
 	.then(setupHostname)
 	.then(setupWebhooks)
 	.then(setupUnixSockets)

@@ -1,5 +1,6 @@
 exports.build = build;
 
+const Log = require('./log');
 const Stats = require('./stats');
 
 const SEC = 1000;
@@ -7,26 +8,41 @@ const MIN = 60 * SEC;
 const HR = 60 * MIN;
 
 const Defaults = {
+	log: {
+		data: true,
+		debug: true,
+		info: true,
+		warn: true,
+		error: true
+	},
 	run: {
 		user: 'www-data',
 		group:  'www-data',
-		webhooks: [
-			'discord'
+		modules: [
+			'discord',
+			'github'
 		],
 		sockPath: '/run/paddle.sock',
-		collectStatsInterval: 5 * SEC,
+		statsInterval: 5 * SEC,
 	},
 	http: {
-		path: '/run/paddle_http.sock'
+		// host: '127.0.0.1',
+		// port: 80,
+		sockPath: '/run/paddle_http.sock',
+		urlPath: '/paddle'
 	},
 	discord: {
-		greetMessage: true,
+		greetMessage: false,
 		reuseStatsMessage: true,
-		combineStatsMessage: true,
-		// url: 'copied from integrations ins discord'
+		combineStatsMessage: true
+		// url: 'copied from integrations in discord'
+	},
+	github: {
+		urlPath: '/github'
 	},
 	services: [
-		/* Provide a local.js file that adds a service. E.g.:
+		/* Provide a local.js file that adds a service.
+		 * E.g.:
 		exports.config = (config) => {
 			config.services.push({
 				name: 'dummy',
@@ -35,11 +51,17 @@ const Defaults = {
 				proxyPass: 'http://unix:/run/dummy.sock',
 				publishStatsInterval: 60000,
 				discord: {
-					url: 'copied from integrations in discord'
+					url: 'copied from integrations in discord',
+					// Forward log messages using this filter:
+					log: [ Log.GIT_PUSH ]
+				},
+				github: {
+					endpoint: '/dummy',
+					secret: 'same secret from webhook settings',
 				}
 			});
 		}
-		* Coderaft does this automagically.
+		* Coderaft generates this automagically.
 		*/
 	],
 	stats: [
@@ -60,10 +82,9 @@ function build () {
 	
 	Local.config(baked);
 
-	if (typeof baked.http.host === 'string' && 
-	    typeof baked.http.port === 'number')
+	if (typeof baked.http.port === 'number')
 		baked.flags.is_inetHttp = true;
-	else if (typeof baked.http.path === 'string')
+	else if (typeof baked.http.sockPath === 'string')
 		baked.flags.is_sockHttp = true;
 	else
 		throw 'Check Config.http.[host,port || path] for bind address';

@@ -1,10 +1,11 @@
-
 exports.init = init;
 exports.notifyEv = handleEv;
 
 const Https = require('node:https');
+const Log = require('./log');
 
 var Paddle = null;
+var Logger = null;
 
 function isGreetMessageOn (service) {
 	return service?.config.discord.greetMessage ??
@@ -16,58 +17,58 @@ function isReuseStatsMessageOn (service) {
 		Paddle.config.discord.reuseStatsMessage;
 }
 
-function log (...args) {
-	console.log('[Discord]', ...args);
-}
-
 function init (instance) {
-	
 	let load = false;
 
 	if (typeof instance.config.discord.url !== 'undefined')
 		load = true;
-	for (let service of instance.config.services) {
-		if (typeof service.discord !== 'undefined')
+
+	for (let config of instance.config.services) {
+		if (typeof config.discord !== 'undefined') {
 			load = true;
+		}
 	}
 
-	if (load)
+	if (load) {
 		Paddle = instance;
+		Paddle.run.discord = {};
 
-	log(`Init (load: ${load})`);
+		Logger = Log.createLogger(instance, 'Discord');
+		Logger.listen(handleLog);
+	}
+
+	Logger.debug(`Init (load: ${load})`);
 	return load;
 }
 
 function handleEv (name, payload) {
-
 	if (name === 'start') {
-		if (isGreetMessageOn(payload))
-			postGreet(payload);
+		const service = payload;
+		service.discord = {};
+		if (isGreetMessageOn(service))
+			postGreet(service);
 	} else if (name === 'stats') {
-		if (!Paddle.config.discord.combineStatsMessage)
+		const service = payload;
+		if (Paddle.config.discord.combineStatsMessage)
 			postStats();
-		if (payload)
-			postStats(payload);
+		else if (service)
+			postStats(service);
 	}
 }
 
 function postGreet (service) {
-
+	const url = new URL(service.config.discord.url);
 	const requestObj = {
 		content: 'Keep paddling :sailboat:'
 	};
-
-	const url = new URL(service.config.discord.url);
 
 	postWebhook(url, requestObj);
 }
 
 function postStats (service) {
 	const state = service ?
-		service.discord || {} :
-		Paddle.run.discord || {};
-	if (service) service.discord = state;
-	else Paddle.run.discord = state;
+		service.discord :
+		Paddle.run.discord;
 
 	let invokeWebhook = postWebhook;
 
@@ -90,12 +91,17 @@ function postStats (service) {
 
 	invokeWebhook(url, requestObj, (responseObj) => {
 
-		if (isReuseStatsMessageOn(service) &&
-			typeof state.statsMessageId === 'undefined' &&
-			responseObj) {
-			state.statsMessageId = responseObj.id;
-			log(`Reusing message ${state.statsMessageId} ` +
-				`(${service ? service.config.name : Paddle.run.hostname})`);
+		if (responseObj &&
+		    isReuseStatsMessageOn(service)) {
+		    
+			if (typeof state.statsMessageId === 'undefined') {
+				state.statsMessageId = responseObj.id;
+				Logger.debug(`Reusing message ${state.statsMessageId} ` +
+					`(${service ? service.config.name : Paddle.run.hostname})`);
+			}
+
+			if (responseObj.code === 10008)
+				state.statsMessageId = undefined;
 		}
 	});
 }
@@ -121,20 +127,20 @@ function requestWebhook (method, url, requestObj, callback) {
 
 		if (response.statusCode != 200 &&
 		    response.statusCode != 204)
-			log(`Bad status ${response.statusCode}`);
+			Logger.warn(`Bad status ${response.statusCode}`);
 
 		response.setEncoding('utf8');
-		let responseJson  = '';
+		let responseJson = '';
 		
 		response.on('data', (chunk) => {
 			responseJson += chunk;
 		});
 		
 		response.on('end', () => {
-			if (response.statusCode !== 200 &&
-			    responseJson.length > 0)
-				console.log(`Response (${responseJson.length}) ${responseJson}`);
-			const responseObj = response.statusCode == 200 ?
+			if (responseJson.length > 0 &&
+			    response.statusCode !== 200)
+				Logger.warn(`Response (${responseJson.length}) ${responseJson}`);
+			const responseObj = responseJson.length > 0 ?
 				JSON.parse(responseJson) :
 				undefined;
 			if (typeof callback === 'function')
@@ -143,19 +149,20 @@ function requestWebhook (method, url, requestObj, callback) {
 	});
 
 	request.on('error', (error) => {
-		log('Request error', error.message);
+		Logger.error('Request error', error.message);
 	});
 
 	const requestJson = JSON.stringify(requestObj);
-	//log('Request', requestJson);
+	Logger.data(`Request ${requestJson}`);
 
 	request.write(requestJson);
 	request.end();
 }
 
 function generateMessage (service) {
+	const now = new Date().toLocaleString('en-us', { timeZoneName: 'short' });
 	let message = `:sailboat:\n` +
-		`**Updated**: ${new Date()}`
+		`**Updated**: ${now}`
 	return message;
 }
 
@@ -181,23 +188,94 @@ function generateEmbeds (service) {
 	}
 
 	if (service) {
-		const fields = [];
-		fields.push({
-			name: 'Service',
-			value: service.config.name,
-			inline: false
-		});
-		for (let stat of service.stats) {
-			fields.push({
-				name: stat.description,
-				value: stat.value,
-				inline: true
-			});
-		}
-		if (fields.length > 0)
-			embeds.push({ fields: fields });
+		embeds.push({ fields: generateServiceFields(service) });
+	} else {
+		for (let service of Paddle.run.services) 
+			embeds.push({ fields: generateServiceFields(service) });
 	}
 
 	return embeds;
-
 }
+
+function generateServiceFields(service) {
+	const fields = [];
+	fields.push({
+		name: 'Service',
+		value: service.config.name,
+		inline: false
+	});
+	for (let stat of service.stats) {
+		fields.push({
+			name: stat.description,
+			value: stat.value,
+			inline: true
+		});
+	}
+	return fields;
+}
+
+function handleLog (source, type, args) {
+	for (let service of Paddle.run.services) {
+		if (typeof service.config.discord !== 'undefined')
+			submitLog(service.config.discord, type, args);
+	}
+}
+
+function submitLog (config, type, args) {
+
+	if (Array.isArray(config.log) &&
+	    config.log.includes(type)) {
+
+		let formatter = null;
+
+		if (Log.PRIMITIVES.includes(type))
+			formatter = formatGeneric;
+
+		if (type === Log.GIT_PUSH)
+			formatter = formatGitPush;
+
+		if (typeof formatter !== 'function') {
+			Log.warn('Formatter not implemented', type);
+			return;
+		}
+
+		postWebhook(new URL(config.url),
+			formatter(config, args));
+	}
+}
+
+function formatGeneric (config, args) {
+	return {
+		content: args.join('\n')
+	};
+}
+
+function formatGitPush(config, args) {
+	let push = args[0];
+
+	const requestObj = {
+		content: Log.formatGitPushObj(push),
+		embeds: []
+	};
+
+	for (let i=1; i<args.length; i++) {
+		let commit = args[i];
+
+		if (typeof commit === 'string') {
+			requestObj.embeds.push({
+				title: Log.formatGitCommitObj(commit)
+			});
+		}
+
+
+		if (typeof commit === 'object') {
+			requestObj.embeds.push({
+				title: Log.formatGitCommitObj(commit),
+				url: commit.url
+			});
+		}
+	}
+
+	return requestObj;
+}
+
