@@ -52,7 +52,8 @@ function setupRoutes (service) {
 
 const EventHandler = {
 	ping: handlePing,
-	push: handlePush
+	push: handlePush,
+	issues: handleIssues
 }
 
 function handleRequest (service, request, response) {
@@ -121,7 +122,7 @@ function handleRequest (service, request, response) {
 		} catch (error) {
 			Logger.error(error);
 		}
-		response.writeHead(500).end();
+		response.writeHead(404).end();
 	});
 }
 
@@ -136,6 +137,7 @@ function handlePush (payload, response) {
 		commits.push(createCommitLogObj(commit));
 
 	Logger.propagate(Log.GIT_PUSH, push, ...commits);
+	response.writeHead(200).end();
 }
 
 function createPushLogObj (push) {
@@ -157,3 +159,21 @@ function createCommitLogObj (commit) {
 		url: commit.url
 	};
 }
+
+function handleIssues (payload, response) {
+	Logger.propagate(Log.ISSUE, createIssueLogObj(payload));
+	response.writeHead(200).end();
+}
+
+function createIssueLogObj (payload) {
+	return {
+		action: payload.action,
+		title: payload.issue.title,
+		username: payload.issue.user.login,
+		timestamp: payload.issue.updated_at,
+		url: payload.issue.html_url,
+		repo: payload.repository.name,
+		repoUrl: payload.repository.html_url
+	};
+}
+

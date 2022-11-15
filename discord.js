@@ -31,7 +31,9 @@ function init (instance) {
 
 	if (load) {
 		Paddle = instance;
-		Paddle.run.discord = {};
+		Paddle.run.discord = {
+			statsMessageId: Paddle.config.discord.statsMessageId
+		};
 
 		Logger = Log.createLogger(instance, 'Discord');
 		Logger.listen(handleLog);
@@ -221,6 +223,11 @@ function handleLog (source, type, args) {
 	}
 }
 
+const LogFormatters = {
+	[Log.GIT_PUSH]: formatGitPush,
+	[Log.ISSUE]: formatIssue
+};
+
 function submitLog (config, type, args) {
 
 	if (Array.isArray(config.log) &&
@@ -230,9 +237,8 @@ function submitLog (config, type, args) {
 
 		if (Log.PRIMITIVES.includes(type))
 			formatter = formatGeneric;
-
-		if (type === Log.GIT_PUSH)
-			formatter = formatGitPush;
+		else
+			formatter = LogFormatters[type];
 
 		if (typeof formatter !== 'function') {
 			Log.warn('Formatter not implemented', type);
@@ -250,7 +256,7 @@ function formatGeneric (config, args) {
 	};
 }
 
-function formatGitPush(config, args) {
+function formatGitPush (config, args) {
 	let push = args[0];
 
 	const requestObj = {
@@ -267,7 +273,6 @@ function formatGitPush(config, args) {
 			});
 		}
 
-
 		if (typeof commit === 'object') {
 			requestObj.embeds.push({
 				title: Log.formatGitCommitObj(commit),
@@ -275,6 +280,19 @@ function formatGitPush(config, args) {
 			});
 		}
 	}
+
+	return requestObj;
+}
+
+function formatIssue (config, args) {
+	const issue = args[0];
+
+	const requestObj = {
+		embeds: [{
+			title: Log.formatIssueObj(issue),
+			url: issue.url
+		}]
+	};
 
 	return requestObj;
 }

@@ -144,7 +144,7 @@ function handlePaddleConnect (client) {
 	client.on('data', (chunk) => {
 		message += chunk;
 		if (message.length > 10240) {
-			console.log("Warning message > 10KiB");
+			Logger.warn("Service message > 10KiB");
 			client.end();
 		}
 	});
@@ -160,9 +160,11 @@ function handlePaddleConnect (client) {
 }
 
 function handlePaddleRequest (request, client) {
+	Logger.data('Service Request', request);
 	const service = lookupService(request.serviceName);
 	if (service) {
-		updateStats(request.stats, service.stats);
+		for (let stat of request.stats)
+			updateStat(stat, service.stats);
 	} else {
 		console.log(`Warning: Request discarded (serviceName: ${request.serviceName})`);
 	}
@@ -197,11 +199,7 @@ function updateStat (stat, stats) {
 	target.id = stat.id;
 	target.description = stat.description;
 	target.value = stat.value;
-}
-
-function updateStats (src, dst) {
-	for (let stat of src)
-		updateStat(stat, dst);
+	Logger.debug('Update stat', target.id, target.value);
 }
 
 function startHttpServer () {
@@ -232,7 +230,7 @@ function handleHttpListen () {
 }
 
 function handleHttpRequest  (request, response) {
-	Logger.debug('Request', request.method, request.url);
+	Logger.debug('Http Request', request.method, request.url);
 
 	const url = new URL(request.url, `http://${request.headers.host}`);
 	const route = findHttpRoute(url);

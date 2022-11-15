@@ -9,8 +9,8 @@ const HR = 60 * MIN;
 
 const Defaults = {
 	log: {
-		data: true,
-		debug: true,
+		data: false,
+		debug: false,
 		info: true,
 		warn: true,
 		error: true
@@ -56,7 +56,7 @@ const Defaults = {
 					log: [ Log.GIT_PUSH ]
 				},
 				github: {
-					endpoint: '/dummy',
+					urlPath: '/dummy',
 					secret: 'same secret from webhook settings',
 				}
 			});

@@ -1,6 +1,7 @@
 exports.createLogger = createLogger;
 exports.formatGitPushObj = formatGitPushObj;
 exports.formatGitCommitObj = formatGitCommitObj;
+exports.formatIssueObj = formatIssueObj;
 
 const Loggers = [];
 
@@ -25,7 +26,10 @@ exports.PRIMITIVES = [
 ];
 
 const LOG_GIT_PUSH = 'GIT-PUSH';
+const LOG_ISSUE = 'ISSUE';
+
 exports.GIT_PUSH = LOG_GIT_PUSH;
+exports.ISSUE = LOG_ISSUE;
 
 function createLogger (instance, modname) {
 	return new Logger(instance, modname);
@@ -121,3 +125,14 @@ function formatGitCommitObj (commit) {
 	});
 	return `${commit.message} (${commit.username} on ${date}) ${shortHash}`;
 }
+
+function formatIssueObj (issue) {
+	const date = new Date(issue.timestamp).toLocaleDateString('en-us', {
+		weekday:'short',
+		day: 'numeric',
+		month: 'short',
+		year: '2-digit'
+	});
+	return `Issue [${issue.action}] ${issue.title} @${issue.repo} (${issue.username} on ${date})`;
+}
+
