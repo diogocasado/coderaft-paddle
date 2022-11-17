@@ -29,6 +29,7 @@ function init (instance) {
 
 function initGlobals (instance) {
 	Paddle = instance;
+	Paddle.github = {};
 	Logger = Log.createLogger(instance, 'GitHub');
 }
 

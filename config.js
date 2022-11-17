@@ -19,6 +19,7 @@ const Defaults = {
 		user: 'www-data',
 		group:  'www-data',
 		modules: [
+			'db',
 			'discord',
 			'github'
 		],
@@ -30,6 +31,9 @@ const Defaults = {
 		// port: 80,
 		sockPath: '/run/paddle_http.sock',
 		urlPath: '/paddle'
+	},
+	db: {
+		dirPath: '.db'
 	},
 	discord: {
 		greetMessage: false,
@@ -53,7 +57,7 @@ const Defaults = {
 				discord: {
 					url: 'copied from integrations in discord',
 					// Forward log messages using this filter:
-					log: [ Log.GIT_PUSH ]
+					log: [ Log.TIP, Log.GIT_PUSH, Log.ISSUE ]
 				},
 				github: {
 					urlPath: '/dummy',

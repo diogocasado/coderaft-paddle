@@ -17,9 +17,10 @@ const Paddle = {
 		hostname: null,
 		services: [],
 		stats: [],
-		discord: undefined,
-		github: undefined
-	}
+	},
+	db: undefined,
+	discord: undefined,
+	github: undefined
 };
 
 let Logger = null;
@@ -36,12 +37,12 @@ async function setupHostname () {
 	console.log(`Hostname: ${Paddle.run.hostname}`);
 }
 
-async function setupWebhooks () {
+async function setupModules () {
 	
 	for (let modname of Paddle.config.run.modules) {
 		Logger.debug(`Load ${modname}`);
 		const module = require('./' + modname);
-		if (module.init(Paddle))
+		if (await module.init(Paddle))
 			Paddle.modules.push(module);
 	}
 
@@ -49,6 +50,7 @@ async function setupWebhooks () {
 		for (let index = 0; index < Paddle.config.services.length; index++) {
 			const config = Paddle.config.services[index];
 			const run = Paddle.run.services[index] = {
+				idx: index,
 				config: config,
 				stats: []
 			};
@@ -123,13 +125,15 @@ async function setguidProcess () {
 	console.log('Running as ' +
 			`${Paddle.config.run.user}:${process.geteuid()},` +
 			`${Paddle.config.run.group}:${process.getegid()}`);
+
+	console.log(Paddle);
 }
 
 function startPaddleServer () {
-	Paddle.PaddleServer = Net.createServer(handlePaddleConnect);
-	Paddle.PaddleServer.on('error', handleError);
-	Paddle.PaddleServer.on('listening', handlePaddleListen);
-	Paddle.PaddleServer.listen(Paddle.config.run.sockPath);
+	Paddle.run.svcServer = Net.createServer(handlePaddleConnect);
+	Paddle.run.svcServer.on('error', handleError);
+	Paddle.run.svcServer.on('listening', handlePaddleListen);
+	Paddle.run.svcServer.listen(Paddle.config.run.sockPath);
 }
 
 function handlePaddleListen () {
@@ -199,13 +203,13 @@ function updateStat (stat, stats) {
 	target.id = stat.id;
 	target.description = stat.description;
 	target.value = stat.value;
-	Logger.debug('Update stat', target.id, target.value);
+	Logger.debug('Update stat', target.id, target.value.replaceAll('\n', ' '));
 }
 
 function startHttpServer () {
-	Paddle.httpServer = Http.createServer(handleHttpRequest);
-	Paddle.httpServer.on('error', handleError);
-	Paddle.httpServer.on('listening', handleHttpListen);
+	Paddle.run.httpServer = Http.createServer(handleHttpRequest);
+	Paddle.run.httpServer.on('error', handleError);
+	Paddle.run.httpServer.on('listening', handleHttpListen);
 	const options = {};
 	if (Paddle.config.flags.is_inetHttp)
 		Object.assign(options, {
@@ -214,7 +218,7 @@ function startHttpServer () {
 		});
 	if (Paddle.config.flags.is_sockHttp)
 		options.path = Paddle.config.http.sockPath;
-	Paddle.httpServer.listen(options);
+	Paddle.run.httpServer.listen(options);
 }
 
 function handleHttpListen () {
@@ -274,7 +278,7 @@ function handleError (error) {
 Promise.resolve({})
 	.then(initLog)
 	.then(setupHostname)
-	.then(setupWebhooks)
+	.then(setupModules)
 	.then(setupUnixSockets)
 	.then(startPaddleServer)
 	.then(startHttpServer)

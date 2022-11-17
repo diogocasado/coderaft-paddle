@@ -17,7 +17,7 @@ function isReuseStatsMessageOn (service) {
 		Paddle.config.discord.reuseStatsMessage;
 }
 
-function init (instance) {
+async function init (instance) {
 	let load = false;
 
 	if (typeof instance.config.discord.url !== 'undefined')
@@ -30,12 +30,14 @@ function init (instance) {
 	}
 
 	if (load) {
-		Paddle = instance;
-		Paddle.run.discord = {
-			statsMessageId: Paddle.config.discord.statsMessageId
-		};
-
 		Logger = Log.createLogger(instance, 'Discord');
+
+		Paddle = instance;
+		Paddle.discord = {};
+
+		Paddle.discord.statsMessageId =
+			await Paddle.db?.get('discord.statsMessageId');
+
 		Logger.listen(handleLog);
 	}
 
@@ -47,6 +49,10 @@ function handleEv (name, payload) {
 	if (name === 'start') {
 		const service = payload;
 		service.discord = {};
+		service.discord.statsMessageId = Paddle.db?.get(
+			['discord',
+			service.config.name,
+			'statsMessageId']);
 		if (isGreetMessageOn(service))
 			postGreet(service);
 	} else if (name === 'stats') {
@@ -70,7 +76,7 @@ function postGreet (service) {
 function postStats (service) {
 	const state = service ?
 		service.discord :
-		Paddle.run.discord;
+		Paddle.discord;
 
 	let invokeWebhook = postWebhook;
 
@@ -98,8 +104,12 @@ function postStats (service) {
 		    
 			if (typeof state.statsMessageId === 'undefined') {
 				state.statsMessageId = responseObj.id;
-				Logger.debug(`Reusing message ${state.statsMessageId} ` +
-					`(${service ? service.config.name : Paddle.run.hostname})`);
+
+				Paddle.db?.put(
+					['discord',
+					state.config?.name,
+					'statsMessageId'],
+					state.statsMessageId);
 			}
 
 			if (responseObj.code === 10008)
@@ -155,7 +165,7 @@ function requestWebhook (method, url, requestObj, callback) {
 	});
 
 	const requestJson = JSON.stringify(requestObj);
-	Logger.data(`Request ${requestJson}`);
+	Logger.data('Request', method, url.href, requestJson);
 
 	request.write(requestJson);
 	request.end();
