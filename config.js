@@ -21,7 +21,8 @@ const Defaults = {
 		modules: [
 			'db',
 			'discord',
-			'github'
+			'github',
+			'git'
 		],
 		sockPath: '/run/paddle.sock',
 		statsInterval: 5 * SEC,
@@ -50,18 +51,23 @@ const Defaults = {
 		exports.config = (config) => {
 			config.services.push({
 				name: 'dummy',
-				gitPath: '/root/dummy',
-				location: '/',
+				path: '/root/dummy',
 				proxyPass: 'http://unix:/run/dummy.sock',
 				publishStatsInterval: 60000,
 				discord: {
 					url: 'copied from integrations in discord',
 					// Forward log messages using this filter:
-					log: [ Log.TIP, Log.GIT_PUSH, Log.ISSUE ]
+					log: [ Log.TIP, Log.GIT_PUSH, Log.ISSUE ],
+					use_threads: false
 				},
 				github: {
 					urlPath: '/dummy',
 					secret: 'same secret from webhook settings',
+				},
+				git: {
+					repo: '',
+					pull: true,
+					restart: true
 				}
 			});
 		}

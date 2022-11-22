@@ -34,7 +34,6 @@ async function init (instance) {
 
 		Paddle = instance;
 		Paddle.discord = {};
-
 		Paddle.discord.statsMessageId =
 			await Paddle.db?.get('discord.statsMessageId');
 
@@ -48,13 +47,10 @@ async function init (instance) {
 function handleEv (name, payload) {
 	if (name === 'start') {
 		const service = payload;
-		service.discord = {};
-		service.discord.statsMessageId = Paddle.db?.get(
-			['discord',
-			service.config.name,
-			'statsMessageId']);
-		if (isGreetMessageOn(service))
-			postGreet(service);
+		if (service.config.discord) {
+			service.discord = {};
+			setupService(service);
+		}
 	} else if (name === 'stats') {
 		const service = payload;
 		if (Paddle.config.discord.combineStatsMessage)
@@ -64,16 +60,30 @@ function handleEv (name, payload) {
 	}
 }
 
-function postGreet (service) {
-	const url = new URL(service.config.discord.url);
-	const requestObj = {
-		content: 'Keep paddling :sailboat:'
-	};
+async function setupService (service) {
+	Logger.info(`Webhook URL for service (${service.config.name}): ${service.config.discord.url}`)
 
-	postWebhook(url, requestObj);
+	service.discord.statsMessageId = await Paddle.db?.get(
+		['discord',
+		service.config.name,
+		'statsMessageId']);
+
+	if (isGreetMessageOn(service))
+		postGreet(service);
 }
 
-function postStats (service) {
+async function postGreet (service) {
+	const now = new Date().toLocaleString('en-us', { timeZoneName: 'short' });
+	const requestObj = {
+		content: `:sailboat: Paddle restarted ${now}`
+	};
+
+	await postWebhook(new URL(service.config.discord.url),  requestObj);
+
+	return true;
+}
+
+async function postStats (service) {
 	const state = service ?
 		service.discord :
 		Paddle.discord;
@@ -97,36 +107,45 @@ function postStats (service) {
 		embeds: generateEmbeds(service)
 	}
 
-	invokeWebhook(url, requestObj, (responseObj) => {
+	const responseObj = await invokeWebhook(url, requestObj);
 
-		if (responseObj &&
-		    isReuseStatsMessageOn(service)) {
-		    
-			if (typeof state.statsMessageId === 'undefined') {
-				state.statsMessageId = responseObj.id;
+	if (responseObj &&
+	    isReuseStatsMessageOn(service)) {
 
-				Paddle.db?.put(
-					['discord',
-					state.config?.name,
-					'statsMessageId'],
-					state.statsMessageId);
-			}
+		if (responseObj.code === 10008)
+			state.statsMessageId = undefined;
+	   	else if (typeof state.statsMessageId === 'undefined') {
+			state.statsMessageId = responseObj.id;
 
-			if (responseObj.code === 10008)
-				state.statsMessageId = undefined;
+			await Paddle.db?.put(
+				['discord',
+				state.config?.name,
+				'statsMessageId'],
+				state.statsMessageId);
 		}
+	}
+
+	return true;
+}
+
+async function postWebhook (url, requestObj) {
+	return asyncExecuteWebhook('POST', url, requestObj);
+}
+
+async function patchWebhook (url, requestObj, callback) {
+	return asyncExecuteWebhook('PATCH', url, requestObj);
+}
+
+async function asyncExecuteWebhook (method, url, requestObj) {
+	return new Promise((resolve, reject) => {
+		executeWebhook(method, url, requestObj, (error, responseObj) => {
+			if (error) reject(error);
+			else resolve(responseObj);
+		});
 	});
 }
 
-function postWebhook (url, requestObj, callback) {
-	requestWebhook('POST', url, requestObj, callback);
-}
-
-function patchWebhook (url, requestObj, callback) {
-	requestWebhook('PATCH', url, requestObj, callback);
-}
-
-function requestWebhook (method, url, requestObj, callback) {
+function executeWebhook (method, url, requestObj, callback) {
 
 	const options = {
 		method: method,
@@ -156,12 +175,13 @@ function requestWebhook (method, url, requestObj, callback) {
 				JSON.parse(responseJson) :
 				undefined;
 			if (typeof callback === 'function')
-				callback(responseObj);
+				callback(null, responseObj);
 		});
 	});
 
 	request.on('error', (error) => {
 		Logger.error('Request error', error.message);
+		callback(error);
 	});
 
 	const requestJson = JSON.stringify(requestObj);
@@ -228,45 +248,45 @@ function generateServiceFields(service) {
 
 function handleLog (source, type, args) {
 	for (let service of Paddle.run.services) {
-		if (typeof service.config.discord !== 'undefined')
-			submitLog(service.config.discord, type, args);
+		if (typeof service.config.discord !== 'undefined' &&
+		    Array.isArray(service.config.discord.log) &&
+		    service.config.discord.log.includes(type))
+			consumeLog(service, type, args);
 	}
 }
 
-const LogFormatters = {
-	[Log.GIT_PUSH]: formatGitPush,
-	[Log.ISSUE]: formatIssue
+const LogIfaces = {
+	[Log.GIT_PUSH]: gitPushIface,
+	[Log.ISSUE]: issueIface,
+	[Log.ISSUE_COMMENT]: issueCommentIface
 };
 
-function submitLog (config, type, args) {
+async function consumeLog (service, type, args) {
+	let iface = null;
 
-	if (Array.isArray(config.log) &&
-	    config.log.includes(type)) {
+	if (Log.PRIMITIVES.includes(type))
+		iface = genericMessageIface;
+	else
+		iface = LogIfaces[type];
 
-		let formatter = null;
-
-		if (Log.PRIMITIVES.includes(type))
-			formatter = formatGeneric;
-		else
-			formatter = LogFormatters[type];
-
-		if (typeof formatter !== 'function') {
-			Log.warn('Formatter not implemented', type);
-			return;
-		}
-
-		postWebhook(new URL(config.url),
-			formatter(config, args));
+	if (typeof iface !== 'function') {
+		Log.warn('Interface not implemented', type);
+		return;
 	}
+
+	return iface(service.config, args);
 }
 
-function formatGeneric (config, args) {
-	return {
-		content: args.join('\n')
-	};
+async function genericMessageIface (config, args) {
+	if (Paddle.ready)
+		await postWebhook(new URL(config.discord.url), {
+			content: args.join('\n')
+		});
+
+	return true;
 }
 
-function formatGitPush (config, args) {
+async function gitPushIface (config, args) {
 	let push = args[0];
 
 	const requestObj = {
@@ -291,19 +311,72 @@ function formatGitPush (config, args) {
 		}
 	}
 
-	return requestObj;
+	await postWebhook(new URL(config.discord.url), requestObj);
+
+	return true;
 }
 
-function formatIssue (config, args) {
+async function issueIface (config, args) {
 	const issue = args[0];
 
 	const requestObj = {
 		embeds: [{
 			title: Log.formatIssueObj(issue),
 			url: issue.url
-		}]
+		}],
+		thread_name: 'Comments'
 	};
 
-	return requestObj;
+	const url = new URL(config.discord.url);
+
+	if (!url.searchParams.has('wait'))
+		url.searchParams.append('wait', true);
+
+	const responseObj = await postWebhook(url, requestObj);
+
+	if (responseObj.id) {
+		await Paddle.db?.put([
+			'discord',
+			config.name,
+			'issues',
+			issue.id],
+			{ messageId: responseObj.id });
+	}
+
+	return true;
 }
+
+async function issueCommentIface (config, args) {
+	const comment = args[0];
+
+	const requestObj = {
+		embeds: [{
+			title: Log.formatIssueCommentObj(comment),
+			url: comment.url
+		}]
+	}
+
+	const url = new URL(config.discord.url);
+
+	if (config.discord.use_threads) {
+
+		if (!url.searchParams.has('wait'))
+			url.searchParams.append('wait', true);
+
+		if (comment.issueId) {
+			const issue = await Paddle.db?.get([
+				'discord',
+				config.name,
+				'issues',
+				comment.issueId]);
+			if (issue)
+				url.searchParams.append('thread_id', issue.messageId);
+		}
+	}
+
+	const responseObj = await postWebhook(url, requestObj);
+
+	return true;
+}
+
 

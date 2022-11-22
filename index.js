@@ -1,5 +1,6 @@
 const OS = require('node:os');
 const Fs = require('node:fs').promises;
+const Child = require('node:child_process');
 const Net = require('node:net');
 const Http = require('node:http');
 
@@ -7,7 +8,7 @@ const Config = require('./config');
 const Log = require('./log');
 
 const promisify = require('node:util').promisify;
-const execFile = promisify(require('node:child_process').execFile);
+const execFile = promisify(Child.execFile);
 
 const Paddle = {
 	config: Config.build(),
@@ -18,23 +19,62 @@ const Paddle = {
 		services: [],
 		stats: [],
 	},
+	root: undefined,
 	db: undefined,
 	discord: undefined,
-	github: undefined
+	github: undefined,
+	ready: false
 };
 
-let Logger = null;
+const Logger = Log.createLogger(Paddle);
+
+const Root = {
+	process: undefined,
+	queue: []
+};
+
+Paddle.root = {
+	async exec (cmd, args, options) {
+		return new Promise ((resolve, reject) => {
+			const id = Date.now() + ':' + Root.queue.length;
+			Root.queue.push({
+				id: id,
+				resolve: resolve,
+				reject: reject
+			});
+			const message = {
+				id: id,
+				type: 'exec',
+				cmd: cmd,
+				args: args || [],
+				options: options || {}
+			};
+			Logger.data('=> Root', message);
+			Root.process.send(message);
+		});
+	}
+};
+
+Promise.resolve({})
+	.then(initLog)
+	.then(setupHostname)
+	.then(setupModules)
+	.then(setupUnixSockets)
+	.then(startLocalServer)
+	.then(startHttpServer)
+	.then(chownUnixSockets)
+	.then(setguidProcess)
+	.then(setReady);
 
 async function initLog () {
 	console.log('== Paddle ==');
-	Logger = Log.createLogger(Paddle);
 }
 
 async function setupHostname () {
 	const hostname = await execFile('hostname');
 	const lines = hostname.stdout.split(/\n\r?/);
 	Paddle.run.hostname = lines[0].trim();
-	console.log(`Hostname: ${Paddle.run.hostname}`);
+	Logger.info(`Hostname: ${Paddle.run.hostname}`);
 }
 
 async function setupModules () {
@@ -122,25 +162,31 @@ async function setguidProcess () {
 	process.setegid(Paddle.config.run.group);
 	process.seteuid(Paddle.config.run.user);
 
-	console.log('Running as ' +
-			`${Paddle.config.run.user}:${process.geteuid()},` +
-			`${Paddle.config.run.group}:${process.getegid()}`);
-
-	console.log(Paddle);
+	Logger.info('Running as ' +
+		`${Paddle.config.run.user}:${Paddle.config.run.group}`);
 }
 
-function startPaddleServer () {
-	Paddle.run.svcServer = Net.createServer(handlePaddleConnect);
-	Paddle.run.svcServer.on('error', handleError);
-	Paddle.run.svcServer.on('listening', handlePaddleListen);
-	Paddle.run.svcServer.listen(Paddle.config.run.sockPath);
+function setReady () {
+	Paddle.ready = true;
 }
 
-function handlePaddleListen () {
+function startLocalServer () {
+	Logger.debug('Starting root process');
+	Root.process = Child.fork('root', [], { cwd: process.cwd() });
+	Root.process.on('message', handleRootMessage);
+	setTimeout(handleRootMessage, 500, { type: 'check' });
+	
+	Paddle.run.localServer = Net.createServer(handleLocalConnect);
+	Paddle.run.localServer.on('error', handleError);
+	Paddle.run.localServer.on('listening', handleLocalListen);
+	Paddle.run.localServer.listen(Paddle.config.run.sockPath);
+}
+
+function handleLocalListen () {
 	console.log('Listening on ' + Paddle.config.run.sockPath);
 }
 
-function handlePaddleConnect (client) {
+function handleLocalConnect (client) {
 	client.setEncoding('utf8');
 	client.setTimeout(500);
 
@@ -154,23 +200,46 @@ function handlePaddleConnect (client) {
 	});
 
 	client.on('end', () => {
-		handlePaddleRequest(JSON.parse(message), client);
+		handleLocalRequest(JSON.parse(message), client);
 	});
 
 	client.on('timeout', () => {
-		console.log('Timeout');
 		client.end();
 	});
 }
 
-function handlePaddleRequest (request, client) {
+function handleLocalRequest (request, client) {
 	Logger.data('Service Request', request);
 	const service = lookupService(request.serviceName);
 	if (service) {
 		for (let stat of request.stats)
 			updateStat(stat, service.stats);
 	} else {
-		console.log(`Warning: Request discarded (serviceName: ${request.serviceName})`);
+		Logger.warn(`Request discarded (serviceName: ${request.serviceName})`);
+	}
+}
+
+function handleRootMessage (message) {
+	Logger.data('<= Root', message);
+	if (message.type === 'check' && !Root.ready) {
+		console.log('FATAL: Root process did not respond');
+		process.exit(1);
+	}
+	if (message.type === 'ready') {
+		Root.ready = true;
+	}
+	if (typeof message.id !== 'undefined') {
+		const index = Root.queue.findIndex(request =>
+			request.id === message.id);
+		if (index >= 0) {
+			const request = Root.queue[index];
+			Root.queue.splice(index, 1);
+
+			if (typeof message.error !== 'undefined')
+				request.reject(message);
+			else
+				request.resolve(message);
+		}
 	}
 }
 
@@ -230,7 +299,7 @@ function handleHttpListen () {
 	else if (Paddle.config.flags.is_sockHttp)
 		bindStr +=
 			'unix:' + Paddle.config.http.sockPath;
-	console.log('Listening on ' + bindStr);
+	Logger.info('Listening on ' + bindStr);
 }
 
 function handleHttpRequest  (request, response) {
@@ -271,17 +340,8 @@ function notifyEv (name, payload) {
 }
 
 function handleError (error) {
-	console.log(error);
+	Logger.error(error);
 	process.exit(1);
 }
 
-Promise.resolve({})
-	.then(initLog)
-	.then(setupHostname)
-	.then(setupModules)
-	.then(setupUnixSockets)
-	.then(startPaddleServer)
-	.then(startHttpServer)
-	.then(chownUnixSockets)
-	.then(setguidProcess);
 

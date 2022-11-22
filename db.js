@@ -19,15 +19,14 @@ async function init (instance) {
 		load = true;
 
 	if (load) {
-		Paddle = instance;
-		Paddle.db = {};
-
 		Logger = Log.createLogger(instance, 'DB');
 
-		await setupDbDir();
-
+		Paddle = instance;
+		Paddle.db = {};
 		Paddle.db.get = get;
 		Paddle.db.put = put;
+
+		await setupDbDir();
 	}
 
 	Logger.debug(`Init (load: ${load})`);

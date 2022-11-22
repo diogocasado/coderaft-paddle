@@ -2,6 +2,7 @@ exports.createLogger = createLogger;
 exports.formatGitPushObj = formatGitPushObj;
 exports.formatGitCommitObj = formatGitCommitObj;
 exports.formatIssueObj = formatIssueObj;
+exports.formatIssueCommentObj = formatIssueCommentObj;
 
 const Loggers = [];
 
@@ -27,9 +28,11 @@ exports.PRIMITIVES = [
 
 const LOG_GIT_PUSH = 'GIT-PUSH';
 const LOG_ISSUE = 'ISSUE';
+const LOG_ISSUE_COMMENT = 'ISSUE-COMMENT';
 
 exports.GIT_PUSH = LOG_GIT_PUSH;
 exports.ISSUE = LOG_ISSUE;
+exports.ISSUE_COMMENT = LOG_ISSUE_COMMENT;
 
 function createLogger (instance, modname) {
 	return new Logger(instance, modname);
@@ -61,7 +64,7 @@ Object.assign(Logger.prototype, {
 	data (...args) {
 		if (this.paddle.config.log.data && args.length > 0) {
 			console.log(...this.prefix(LOG_DATA, args));
-			this.propagate(LOG_DATA, ...args);
+			this.broadcast(LOG_DATA, ...args);
 		}
 		return !!this.paddle.config.log.data;
 	},
@@ -69,7 +72,7 @@ Object.assign(Logger.prototype, {
 	debug (...args) {
 		if (this.paddle.config.log.debug && args.length > 0) {
 			console.log(...this.prefix(LOG_DEBUG, args));
-			this.propagate(LOG_DEBUG, ...args);
+			this.broadcast(LOG_DEBUG, ...args);
 		}
 		return !!this.paddle.config.log.debug;
 	},
@@ -77,7 +80,7 @@ Object.assign(Logger.prototype, {
 	info (...args) {
 		if (this.paddle.config.log.info && args.length > 0) {
 			console.log(...this.prefix(LOG_INFO, args));
-			this.propagate(LOG_INFO, ...args);
+			this.broadcast(LOG_INFO, ...args);
 		}
 		return !!this.paddle.config.log.info;
 	},
@@ -85,7 +88,7 @@ Object.assign(Logger.prototype, {
 	warn (...args) {
 		if (this.paddle.config.log.warn && args.length > 0) {
 			console.log(...this.prefix(LOG_WARN, args));
-			this.propagate(LOG_WARN, ...args);
+			this.broadcast(LOG_WARN, ...args);
 		}
 		return !!this.paddle.config.log.warn;
 	},
@@ -93,7 +96,7 @@ Object.assign(Logger.prototype, {
 	error (...args) {
 		if (this.paddle.config.log.error && args.length > 0) {
 			console.log(...this.prefix(LOG_ERROR, args));
-			this.propagate(LOG_ERROR, ...args);
+			this.broadcast(LOG_ERROR, ...args);
 		}
 		return !!this.paddle.config.log.error;
 	},
@@ -102,7 +105,7 @@ Object.assign(Logger.prototype, {
 		this.listener = listener;
 	},
 
-	propagate (type, ...args) {
+	broadcast (type, ...args) {
 		for (let logger of Loggers)
 			if (logger !== this &&
 			    typeof logger.listener === 'function')
@@ -112,7 +115,7 @@ Object.assign(Logger.prototype, {
 
 function formatGitPushObj (push) {
 	return `${push.host} ${push.username} ` +
-		`pushed to ${push.repo}`;
+		`pushed to ${push.repo} (${push.ref})`;
 }
 
 function formatGitCommitObj (commit) {
@@ -134,5 +137,15 @@ function formatIssueObj (issue) {
 		year: '2-digit'
 	});
 	return `Issue [${issue.action}] ${issue.title} @${issue.repo} (${issue.username} on ${date})`;
+}
+
+function formatIssueCommentObj (comment) {
+	const date = new Date(comment.timestamp).toLocaleDateString('en-us', {
+		weekday:'short',
+		day: 'numeric',
+		month: 'short',
+		year: '2-digit'
+	});
+	return `Comment [${comment.action}] ${comment.content} (${comment.username} on ${date})`;
 }
 

@@ -36,25 +36,33 @@ function initGlobals (instance) {
 function handleEv (name, payload) {
 	if (name === 'start') {
 		const service = payload;
-		setupRoutes(service);
-		service.github = {};
+		if (service.config.github) {
+			service.github = {};
+			setupRoutes(service);
+		}
 	}
 }
 
 function setupRoutes (service) {
 	const urlPath = Paddle.config.github.urlPath +
 		service.config.github.urlPath;
+
 	Logger.debug('Add route', urlPath);
 	Paddle.routes.push({
 		urlPath: urlPath,
 		handler: handleRequest.bind(null, service)
 	});
+
+	const absUrl = `${Paddle.run.hostname}/${Paddle.config.http.urlPath}/${urlPath}`
+		.replaceAll(/\/+/g, '/');
+	Logger.info(`Payload URL for service (${service.config.name}): https://${absUrl}`);
 }
 
 const EventHandler = {
 	ping: handlePing,
 	push: handlePush,
-	issues: handleIssues
+	issues: handleIssues,
+	issue_comment: handleIssueComments
 }
 
 function handleRequest (service, request, response) {
@@ -137,7 +145,7 @@ function handlePush (payload, response) {
 	for (let commit of payload.commits)
 		commits.push(createCommitLogObj(commit));
 
-	Logger.propagate(Log.GIT_PUSH, push, ...commits);
+	Logger.broadcast(Log.GIT_PUSH, push, ...commits);
 	response.writeHead(200).end();
 }
 
@@ -162,17 +170,37 @@ function createCommitLogObj (commit) {
 }
 
 function handleIssues (payload, response) {
-	Logger.propagate(Log.ISSUE, createIssueLogObj(payload));
+	Logger.broadcast(Log.ISSUE, createIssueLogObj(payload));
 	response.writeHead(200).end();
 }
 
 function createIssueLogObj (payload) {
 	return {
+		id: payload.issue.id,
 		action: payload.action,
 		title: payload.issue.title,
 		username: payload.issue.user.login,
 		timestamp: payload.issue.updated_at,
 		url: payload.issue.html_url,
+		repo: payload.repository.name,
+		repoUrl: payload.repository.html_url
+	};
+}
+
+function handleIssueComments (payload, response) {
+	Logger.broadcast(Log.ISSUE_COMMENT, createIssueCommentLogObj(payload));
+	response.writeHead(200).end();
+}
+
+function createIssueCommentLogObj (payload) {
+	return {
+		issueId: payload.issue.id,
+		id: payload.comment.id,
+		action: payload.action,
+		content: payload.comment.body,
+		username: payload.comment.user.login,
+		timestamp: payload.comment.updated_at,
+		url: payload.comment.html_url,
 		repo: payload.repository.name,
 		repoUrl: payload.repository.html_url
 	};
