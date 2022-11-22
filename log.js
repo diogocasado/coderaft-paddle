@@ -61,15 +61,15 @@ Object.assign(Logger.prototype, {
 		return values;
 	},
 
-	data (...args) {
+	async data (...args) {
 		if (this.paddle.config.log.data && args.length > 0) {
 			console.log(...this.prefix(LOG_DATA, args));
-			this.broadcast(LOG_DATA, ...args);
+			await this.broadcast(LOG_DATA, ...args);
 		}
 		return !!this.paddle.config.log.data;
 	},
 
-	debug (...args) {
+	async debug (...args) {
 		if (this.paddle.config.log.debug && args.length > 0) {
 			console.log(...this.prefix(LOG_DEBUG, args));
 			this.broadcast(LOG_DEBUG, ...args);
@@ -77,26 +77,26 @@ Object.assign(Logger.prototype, {
 		return !!this.paddle.config.log.debug;
 	},
 
-	info (...args) {
+	async info (...args) {
 		if (this.paddle.config.log.info && args.length > 0) {
 			console.log(...this.prefix(LOG_INFO, args));
-			this.broadcast(LOG_INFO, ...args);
+			await this.broadcast(LOG_INFO, ...args);
 		}
 		return !!this.paddle.config.log.info;
 	},
 
-	warn (...args) {
+	async warn (...args) {
 		if (this.paddle.config.log.warn && args.length > 0) {
 			console.log(...this.prefix(LOG_WARN, args));
-			this.broadcast(LOG_WARN, ...args);
+			await this.broadcast(LOG_WARN, ...args);
 		}
 		return !!this.paddle.config.log.warn;
 	},
 
-	error (...args) {
+	async error (...args) {
 		if (this.paddle.config.log.error && args.length > 0) {
 			console.log(...this.prefix(LOG_ERROR, args));
-			this.broadcast(LOG_ERROR, ...args);
+			await this.broadcast(LOG_ERROR, ...args);
 		}
 		return !!this.paddle.config.log.error;
 	},
@@ -105,11 +105,15 @@ Object.assign(Logger.prototype, {
 		this.listener = listener;
 	},
 
-	broadcast (type, ...args) {
-		for (let logger of Loggers)
+	async broadcast (type, ...args) {
+		const awaits = [];
+		for (let logger of Loggers) {
 			if (logger !== this &&
 			    typeof logger.listener === 'function')
-				logger.listener(this, type, args);
+				awaits.push(logger.listener(this, type, args));
+		}
+		return awaits.length > 0 ?
+			Promise.all(awaits) : false;
 	}
 });
 

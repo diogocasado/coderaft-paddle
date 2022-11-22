@@ -61,32 +61,47 @@ async function handlePush (service, args) {
 }
 
 async function execPull (service) {
-	Logger.info(`Pulling repository ${service.config.git.repo} @${Paddle.run.hostname}`);
-	const pull = await Paddle.root.exec(
+	const out = [
+		`Pulling repository ${service.config.git.repo} @${Paddle.run.hostname}\n`
+	];
+
+	const pullExec = await Paddle.root.exec(
 		'git', ['-C', service.config.path, 'pull'],
 		{ cwd: service.config.path });
 
-	const pullOut = pull.stderr.length > 0 ?
-		pull.stderr : pull.stdout;
-	Logger.info(...pullOut.split('\n')
-			.map(line => line.trim())
-			.filter(line => line.length > 1))
+	const pullOut = pullExec.stderr.length > 0 ?
+		pullExec.stderr : pullExec.stdout;
+
+	out.push(pullOut.split('\n')
+		.map(line => line.trim())
+		.filter(line => line.length > 1)
+		.join('\n'));
+
+	await Logger.info(...out);
 }
 
 async function execRestart (service) {
-	Logger.info(`Restarting service ${service.config.name} @${Paddle.run.hostname}`);
-	const restart = await Paddle.root.exec(
+	const out = [
+		`Restarting service ${service.config.name} @${Paddle.run.hostname}\n`
+	];
+
+	const restartExec = await Paddle.root.exec(
 		'systemctl', ['restart', service.config.name]);
 
-	const status = await Paddle.root.exec(
+	const statusExec = await Paddle.root.exec(
 		'systemctl', ['status', service.config.name,'-n3']);
-	const statusLines = status.stdout
+
+	const statusLines = statusExec.stdout
 		.split('\n')
 		.map(line => line.trim())
 		.filter(line => line.length > 1);
-	Logger.info(
-		statusLines[0],
-		statusLines[2],
-		...statusLines.slice(9));
+
+	out.push([
+		statusLines[2].split(' since ')[0],
+		...statusLines.slice(9)
+			.map(line => line.slice(line.indexOf(': ') + 1))
+		].join('\n'));
+
+	await Logger.info(...out);
 }
 

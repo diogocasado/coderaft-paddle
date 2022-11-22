@@ -246,13 +246,15 @@ function generateServiceFields(service) {
 	return fields;
 }
 
-function handleLog (source, type, args) {
+async function handleLog (source, type, args) {
+	const awaits = [];
 	for (let service of Paddle.run.services) {
 		if (typeof service.config.discord !== 'undefined' &&
 		    Array.isArray(service.config.discord.log) &&
 		    service.config.discord.log.includes(type))
-			consumeLog(service, type, args);
+			await consumeLog(service, type, args);
 	}
+	return Promise.all(awaits);
 }
 
 const LogIfaces = {
@@ -278,10 +280,19 @@ async function consumeLog (service, type, args) {
 }
 
 async function genericMessageIface (config, args) {
-	if (Paddle.ready)
-		await postWebhook(new URL(config.discord.url), {
-			content: args.join('\n')
-		});
+
+	if (Paddle.ready) {
+		const requestObj = {
+			content: args[0],
+			embeds: []
+		};
+		for (let index = 1; index < args.length; index++)
+			requestObj.embeds.push({
+				title: args[index]
+			});
+
+		await postWebhook(new URL(config.discord.url), requestObj);
+	}
 
 	return true;
 }
@@ -378,5 +389,4 @@ async function issueCommentIface (config, args) {
 
 	return true;
 }
-
 
