@@ -1,5 +1,6 @@
 const OS = require('node:os');
 const Fs = require('node:fs').promises;
+const Path = require('node:path');
 const Child = require('node:child_process');
 const Net = require('node:net');
 const Http = require('node:http');
@@ -47,7 +48,7 @@ Paddle.root = {
 				type: 'exec',
 				cmd: cmd,
 				args: args || [],
-				options: options || {}
+				cwd: options?.cwd
 			};
 			Logger.data('=> Root', message);
 			Root.process.send(message);
@@ -173,7 +174,7 @@ function setReady () {
 
 function startLocalServer () {
 	Logger.debug('Starting root process');
-	Root.process = Child.fork('root', [], { cwd: process.cwd() });
+	Root.process = Child.fork(Path.resolve(__dirname, 'root'));
 	Root.process.on('message', handleRootMessage);
 	setTimeout(handleRootMessage, 500, { type: 'check' });
 	

@@ -47,7 +47,7 @@ async function configService (service) {
 		git.repo = await getRepoName(service.config.path);
 		git.branch = await getCurrBranch(service.config.path);
 		Logger.info(`Detected repo ${git.repo}/${git.branch}`);
-		const effRepo = service.config.git.repo ?? service.git.repo;
+		const effRepo = service.config.git.repo ?? git.repo;
 		if (effRepo !== git.repo)
 			Logger.warn('Overriding repo name ${service.config.repo}');
 		service.git = git;
