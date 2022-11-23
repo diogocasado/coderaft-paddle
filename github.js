@@ -55,7 +55,7 @@ function setupRoutes (service) {
 
 	const absUrl = `${Paddle.run.hostname}/${Paddle.config.http.urlPath}/${urlPath}`
 		.replaceAll(/\/+/g, '/');
-	Logger.info(`Payload URL for service (${service.config.name}): https://${absUrl}`);
+	Logger.info(`Payload URL: https://${absUrl}`);
 }
 
 const EventHandler = {

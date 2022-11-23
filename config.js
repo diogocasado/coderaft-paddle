@@ -65,7 +65,7 @@ const Defaults = {
 					secret: 'same secret from webhook settings',
 				},
 				git: {
-					repo: '',
+					repo: '(optional) override name',
 					pull: true,
 					restart: true
 				}

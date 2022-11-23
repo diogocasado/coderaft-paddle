@@ -33,18 +33,32 @@ async function init (instance) {
 	return load;
 }
 
-function handleEv (name, payload) {
+async function handleEv (name, payload) {
 	if (name === 'start') {
 		const service = payload;
-		if (service.config.git) {
-			service.git = {};
-		}
+		if (service.config.git)
+			await configService(service);
+	}
+}
+
+async function configService (service) {
+	const git = {};
+	try {
+		git.repo = await getRepoName(service.config.path);
+		git.branch = await getCurrBranch(service.config.path);
+		Logger.info(`Detected repo ${git.repo}/${git.branch}`);
+		const effRepo = service.config.git.repo ?? service.git.repo;
+		if (effRepo !== git.repo)
+			Logger.warn('Overriding repo name ${service.config.repo}');
+		service.git = git;
+	} catch (error) {
+		Logger.error(`Could not determine branch info`, error);
 	}
 }
 
 function handleLog (source, type, args) {
 	for (let service of Paddle.run.services) {
-		if (typeof service.config.git !== 'undefined' &&
+		if (typeof service.git !== 'undefined' &&
 		    type === Log.GIT_PUSH)
 			handlePush(service, args);
 	}
@@ -53,11 +67,45 @@ function handleLog (source, type, args) {
 async function handlePush (service, args) {
 	const push = args[0];
 
-	if (push.repo === service.config.git.repo &&
-	    push.ref === service.config.git.ref) {
-		service.config.git.pull && await execPull(service);
-		service.config.git.restart && await execRestart(service);
+	const ref = 'refs/heads/' + service.git.branch;
+	if (push.repo === (service.config.git.repo ?? service.git.repo) &&
+	    push.ref === ref) {
+		if (service.config.git.pull) {
+			await execPull(service);
+			if (service.config.git.restart)
+				await execRestart(service);
+		}
 	}
+}
+
+async function getRepoName (path) {
+	const exec = Paddle.ready ?
+		Padddle.root.exec : execFile;
+
+	const gitExec = await exec(
+		'git', ['-C', path, 'config', '--get', 'remote.origin.url']);
+
+	if (gitExec.stderr.length > 0)
+		throw gitExec.stderr;
+
+	return gitExec.stdout
+		.split('/')
+		.slice(-1)[0]
+		.split('.git')[0].trim();
+}
+
+
+async function getCurrBranch (path) {
+	const exec = Paddle.ready ?
+		Padddle.root.exec : execFile;
+
+	const gitExec = await exec(
+		'git', ['-C', path, 'branch', '--show-current']);
+
+	if (gitExec.stderr.length > 0)
+		throw gitExec.stderr;
+
+	return gitExec.stdout.trim();
 }
 
 async function execPull (service) {
@@ -66,8 +114,7 @@ async function execPull (service) {
 	];
 
 	const pullExec = await Paddle.root.exec(
-		'git', ['-C', service.config.path, 'pull'],
-		{ cwd: service.config.path });
+		'git', ['-C', service.config.path, 'pull']);
 
 	const pullOut = pullExec.stderr.length > 0 ?
 		pullExec.stderr : pullExec.stdout;

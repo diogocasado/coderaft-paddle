@@ -61,7 +61,7 @@ function handleEv (name, payload) {
 }
 
 async function setupService (service) {
-	Logger.info(`Webhook URL for service (${service.config.name}): ${service.config.discord.url}`)
+	Logger.info(`Webhook URL: ${service.config.discord.url}`)
 
 	service.discord.statsMessageId = await Paddle.db?.get(
 		['discord',
@@ -305,8 +305,8 @@ async function gitPushIface (config, args) {
 		embeds: []
 	};
 
-	for (let i=1; i<args.length; i++) {
-		let commit = args[i];
+	for (let index = 1; index < args.length; index++) {
+		let commit = args[index];
 
 		if (typeof commit === 'string') {
 			requestObj.embeds.push({

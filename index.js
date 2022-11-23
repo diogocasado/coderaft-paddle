@@ -95,7 +95,8 @@ async function setupModules () {
 				stats: []
 			};
 
-			notifyEv('start', run);
+			Logger.info(`Start service (${config.name})`);
+			await notifyEv('start', run);
 
 			if (typeof config.publishStatsInterval !== 'undefined' &&
 				config.publishStatsInterval > 0)
@@ -331,11 +332,11 @@ async function updateStats () {
 	}
 }
 
-function notifyEv (name, payload) {
+async function notifyEv (name, payload) {
 	Logger.debug('Event', name);
 	for (let module of Paddle.modules) {
 		if (typeof module.notifyEv === 'function')
-			module.notifyEv(name, payload);
+			await module.notifyEv(name, payload);
 	}
 }
 

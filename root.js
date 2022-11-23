@@ -34,7 +34,8 @@ async function handleMessage (message) {
 			result.stdout = cmd.stdout;
 			result.stderr = cmd.stderr;
 		} catch (error) {
-			message.error = error;
+			result.code = error.code;
+			result.stderr = error.stderr;
 		}
 		process.send(result);
 		return true;
