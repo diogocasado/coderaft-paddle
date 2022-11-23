@@ -66,7 +66,7 @@ function handleEv (name, payload) {
 
 const pathRule =/[^0-9a-zA-Z\.]+/;
 
-async function walk (logicPath) {
+async function walk (logicPath, carvePath) {
 
 	if (Array.isArray(logicPath))
 		logicPath = logicPath.join('.');
@@ -88,8 +88,8 @@ async function walk (logicPath) {
 	} catch (error) {
 		if (error.errno !== -OS.constants.errno.ENOENT)
 			throw error;
-		
-		await Fs.mkdir(diskPath, { recursive: true });
+		if (carvePath)
+			await Fs.mkdir(diskPath, { recursive: true });
 	}
 
 	return Path.join(
@@ -113,8 +113,7 @@ async function get (logicPath) {
 
 async function put (logicPath, value) {
 	Logger.debug('Put', logicPath, value);
-	const fullPath = await walk(logicPath);
-	console.log(fullPath);
+	const fullPath = await walk(logicPath, true);
 	await Fs.writeFile(fullPath, JSON.stringify(value), { encoding: 'utf8' });
 }
 

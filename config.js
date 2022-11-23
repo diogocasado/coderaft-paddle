@@ -1,5 +1,6 @@
 exports.build = build;
 
+const Path = require('node:path');
 const Log = require('./log');
 const Stats = require('./stats');
 
@@ -34,7 +35,7 @@ const Defaults = {
 		urlPath: '/paddle'
 	},
 	db: {
-		dirPath: '.db'
+		dirPath: Path.resolve(__dirname, '.db')
 	},
 	discord: {
 		greetMessage: false,
